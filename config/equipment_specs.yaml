@@ -1,0 +1,14 @@
+﻿equipment:
+  id: "MTR-2040-A"
+  type: "Three-Phase Induction Motor"
+  rated_power_kw: 15.0
+  rated_rpm: 1770.0               # Running frequency 1X = ~29.5 Hz
+  bearing:
+    model: "SKF 6205"
+    pitch_diameter_mm: 38.5
+    ball_diameter_mm: 7.94
+    num_balls: 9
+    contact_angle_deg: 0.0
+    # Pre-calculated kinematic defect factors relative to shaft speed:
+    bpfo_multiplier: 3.584        # Outer race defect factor (~105.7 Hz at 1770 RPM)
+    bpfi_multiplier: 5.416        # Inner race defect factor (~159.8 Hz at 1770 RPM)

@@ -1,0 +1,9 @@
+vibration_severity_iso_10816:
+  good_rms_limit: 1.12
+  acceptable_rms_limit: 2.80
+  alert_rms_limit: 4.50
+  danger_rms_limit: 7.10
+
+statistical_thresholds:
+  kurtosis_alarm: 4.5
+  crest_factor_alarm: 6.0

@@ -1,0 +1,170 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Predictive Maintenance & Vibration Intelligence Console</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #f8fafc;
+      --text-dim: #94a3b8;
+      --accent: #38bdf8;
+      --good: #22c55e;
+      --acceptable: #eab308;
+      --alert: #f97316;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 24px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    h1 { font-size: 1.4rem; font-weight: 700; }
+    .badge { padding: 6px 14px; border-radius: 9999px; font-weight: 700; font-size: 0.85rem; }
+    .zone-GOOD { background: rgba(34, 197, 94, 0.2); color: var(--good); border: 1px solid var(--good); }
+    .zone-ACCEPTABLE { background: rgba(234, 179, 8, 0.2); color: var(--acceptable); border: 1px solid var(--acceptable); }
+    .zone-ALERT { background: rgba(249, 115, 22, 0.2); color: var(--alert); border: 1px solid var(--alert); }
+    .zone-DANGER { background: rgba(239, 68, 68, 0.2); color: var(--danger); border: 1px solid var(--danger); }
+    
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
+    .card-title { font-size: 0.8rem; text-transform: uppercase; color: var(--text-dim); margin-bottom: 8px; }
+    .card-val { font-size: 1.8rem; font-weight: 700; color: var(--text); }
+    .card-sub { font-size: 0.8rem; color: var(--text-dim); margin-top: 4px; }
+
+    .chart-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 24px; }
+    .chart-container { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 18px; height: 350px; display: flex; flex-direction: column; }
+    canvas { width: 100%; height: 100%; background: #0b1120; border-radius: 4px; }
+    
+    .controls { display: flex; gap: 12px; }
+    button { background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    button.danger { background: #dc2626; }
+    button.danger:hover { background: #b91c1c; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Bearing & Motor Vibration Intelligence Edge Node</h1>
+      <p style="color: var(--text-dim); font-size: 0.85rem;">Motor: MTR-2040-A | Bearing: SKF 6205 | ISO 10816-3 Class II</p>
+    </div>
+    <div id="isoBadge" class="badge zone-GOOD">ISO: INITIALIZING</div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-title">Overall Health Index</div>
+      <div class="card-val" id="valHealth">-- %</div>
+      <div class="card-sub">Isolation Forest + ISO Hybrid</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Projected RUL</div>
+      <div class="card-val" id="valRul" style="color: var(--accent);">-- hrs</div>
+      <div class="card-sub">Degradation Extrapolation</div>
+    </div>
+    <div class="card">
+      <div class="card-title">RMS Vibration Energy</div>
+      <div class="card-val" id="valRms">-- g</div>
+      <div class="card-sub">Trip Limit: 4.50 g</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Bearing Temperature</div>
+      <div class="card-val" id="valTemp">-- °C</div>
+      <div class="card-sub" id="valCycles">Cycle: 0</div>
+    </div>
+  </div>
+
+  <div class="chart-grid">
+    <div class="chart-container">
+      <div class="card-title" style="margin-bottom: 8px;">Live FFT Spectrum (0 - 500 Hz)</div>
+      <canvas id="spectrumCanvas" width="700" height="280"></canvas>
+    </div>
+    <div class="chart-container">
+      <div class="card-title" style="margin-bottom: 12px;">Dominant Kinematic Frequencies</div>
+      <div id="peaksList" style="font-size: 0.9rem; line-height: 2;">Awaiting stream...</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button onclick="injectWear()">Inject Accelerated Wear (+5%)</button>
+    <button class="danger" onclick="resetMachine()">Reset Machine (New Bearing)</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('spectrumCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function drawSpectrum(frequencies, amplitudes) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Grid lines
+      ctx.strokeStyle = '#1e293b';
+      ctx.lineWidth = 1;
+      for (let y = 0; y < canvas.height; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      if (!amplitudes || amplitudes.length === 0) return;
+
+      const maxAmp = Math.max(2.0, ...amplitudes);
+      const stepX = canvas.width / amplitudes.length;
+
+      ctx.beginPath();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+
+      amplitudes.forEach((amp, idx) => {
+        const x = idx * stepX;
+        const normY = (amp / maxAmp) * (canvas.height - 30);
+        const y = canvas.height - normY - 10;
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    const evtSource = new EventSource('/stream');
+
+    evtSource.onmessage = function(event) {
+      try {
+        const data = JSON.parse(event.data);
+
+        document.getElementById('valHealth').textContent = data.health_index.toFixed(1) + ' %';
+        document.getElementById('valRul').textContent = data.rul_hours > 0 ? data.rul_hours.toFixed(1) + ' hrs' : 'Calibrating...';
+        document.getElementById('valRms').textContent = data.rms.toFixed(3) + ' g';
+        document.getElementById('valTemp').textContent = data.temperature_c.toFixed(1) + ' °C';
+        document.getElementById('valCycles').textContent = 'Cycle: ' + data.cycle + ' | Kurtosis: ' + data.kurtosis.toFixed(2);
+
+        const badge = document.getElementById('isoBadge');
+        badge.textContent = 'ISO: ' + data.iso_zone;
+        badge.className = 'badge zone-' + data.iso_zone;
+
+        drawSpectrum(data.fft_frequencies, data.fft_amplitudes);
+
+        const peaksHtml = data.dominant_peaks.map((p, idx) => {
+          let label = 'Harmonic';
+          if (Math.abs(p[0] - 29.5) < 3.0) label = '1X Running Speed';
+          else if (Math.abs(p[0] - 59.0) < 3.0) label = '2X Misalignment';
+          else if (Math.abs(p[0] - 105.7) < 3.0) label = 'BPFO Bearing Defect';
+          return '<div><strong>#' + (idx + 1) + ': ' + p[0].toFixed(1) + ' Hz</strong> (' + p[1].toFixed(3) + ' g) &mdash; <span style=\"color: var(--accent);\">' + label + '</span></div>';
+        }).join('');
+        document.getElementById('peaksList').innerHTML = peaksHtml || '<div>No dominant harmonics found</div>';
+      } catch (e) {
+        console.error('Frame decode error:', e);
+      }
+    };
+
+    function injectWear() {
+      fetch('/api/degrade?rate=0.05', { method: 'POST' });
+    }
+
+    function resetMachine() {
+      fetch('/api/reset', { method: 'POST' });
+    }
+  </script>
+</body>
+</html>
