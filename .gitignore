@@ -1,6 +1,23 @@
+﻿# Virtual Environment
 venv/
+env/
+ENV/
+
+# Python Cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
 .pytest_cache/
-data/telemetry/*
-!data/telemetry/.gitkeep
+
+# Databases & Cache
+*.db
+*.sqlite3
+metrology_history.db
+
+# OS Artifacts
+Thumbs.db
+.DS_Store
+
+# Uploaded inspection artifacts
+data/drawings/*.png
+!data/drawings/sample_drawing_01.png
