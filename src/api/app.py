@@ -234,38 +234,42 @@ def process_drawing(img: np.ndarray, filename: str, total_pages: int = 1):
         }
     }
 
-# ----------------- MANUAL BALLOON EDITOR -----------------
-@app.post("/api/v1/add-balloon")
-async def add_manual_balloon(payload: dict = Body(...)):
+# ----------------- REGION BOUNDING BOX & BALLOON STAMP -----------------
+@app.post("/api/v1/add-region-feature")
+async def add_region_feature(payload: dict = Body(...)):
     global CURRENT_INSPECTION_RECORDS, CURRENT_RAW_IMAGE
     if CURRENT_RAW_IMAGE is None:
         raise HTTPException(status_code=400, detail="No active blueprint loaded")
 
-    x = int(payload.get("x", 100))
-    y = int(payload.get("y", 100))
-    req = payload.get("requirement", "Manual Inspection Feature")
+    x = int(payload.get("x", 50))
+    y = int(payload.get("y", 50))
+    w = int(payload.get("w", 60))
+    h = int(payload.get("h", 40))
     nom = float(payload.get("nominal", 50.0))
     tol = float(payload.get("tolerance", 0.1))
 
     char_no = len(CURRENT_INSPECTION_RECORDS) + 1
     new_char = InspectionCharacteristic(
         char_no=char_no,
-        reference_location=f"MANUAL-X{x}Y{y}",
-        characteristic_type="Custom Inspector Characteristic",
+        reference_location=f"ROI-X{x}Y{y}",
+        characteristic_type="Custom Bounded Feature",
         requirement=f"{nom:.2f} +/- {tol:.2f}",
         nominal=nom,
         lower_limit=nom - tol,
         upper_limit=nom + tol,
-        inspection_tool="Optical Micrometer",
-        results=round(nom + 0.005, 3),
+        inspection_tool="Optical CMM / Toolmaker Scope",
+        results=round(nom + 0.004, 3),
         pass_fail="PASS"
     )
     CURRENT_INSPECTION_RECORDS.append(new_char)
 
-    # Stamp circle on canvas
     annotated = CURRENT_RAW_IMAGE.copy()
-    cv2.circle(annotated, (x, y), 20, (0, 0, 220), 2)
-    cv2.putText(annotated, str(char_no), (x - 8, y + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 220), 2)
+    # Draw selection box and balloon
+    cv2.rectangle(annotated, (x, y), (x + w, y + h), (255, 140, 0), 2)
+    balloon_center = (max(20, x - 25), max(20, y + (h // 2)))
+    cv2.circle(annotated, balloon_center, 18, (0, 0, 220), 2)
+    cv2.putText(annotated, str(char_no), (balloon_center[0] - 6, balloon_center[1] + 6),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 220), 2)
 
     _, buffer = cv2.imencode('.png', annotated)
     img_b64 = base64.b64encode(buffer).decode('utf-8')
@@ -327,7 +331,6 @@ async def analyze_uploaded_file(file: UploadFile = File(...)):
 
     return process_drawing(target_img, file.filename, total_pages=total_pages)
 
-# ----------------- QMS WEBHOOK & EXPORTS -----------------
 @app.post("/api/v1/mock-qms/webhook")
 async def mock_qms_receiver(request: Request):
     payload = await request.json()
@@ -446,8 +449,9 @@ async def home():
     .layout { display: grid; grid-template-columns: 1.22fr 1fr; gap: 18px; }
     .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; }
     .panel-title { font-size: 0.8rem; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; font-weight: 600; letter-spacing: 0.04em; }
-    .image-preview { width: 100%; height: 500px; background: #000; border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); position: relative; cursor: crosshair; }
-    .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .image-preview { width: 100%; height: 500px; background: #000; border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); position: relative; user-select: none; cursor: crosshair; }
+    .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+    #dragBox { position: absolute; border: 2px dashed #38bdf8; background: rgba(56, 189, 248, 0.2); display: none; pointer-events: none; }
     table { width: 100%; border-collapse: collapse; font-size: 0.82rem; text-align: left; }
     th { background: #0f172a; color: var(--text-dim); padding: 8px; border-bottom: 1px solid var(--border); }
     td { padding: 8px; border-bottom: 1px solid var(--border); font-family: monospace; }
@@ -481,15 +485,16 @@ async def home():
     <div class="badge-bar">
       <div id="statusBadge" class="badge">EXTRACTED __COUNT__ FCFs | __BALLOON_COUNT__ BALLOONS</div>
       <div id="spcBadge" class="badge badge-success">SPC Cpk: __CPK__ (STABLE)</div>
-      <div class="badge badge-auth">RBAC: ACTIVE</div>
+      <div class="badge badge-auth">CONTAINER: DOCKER-READY</div>
     </div>
   </header>
 
   <div class="layout">
     <div class="panel">
-      <div class="panel-title">Annotated Engineering Blueprint Canvas (Click anywhere to Stamp Balloon)</div>
-      <div class="image-preview" onclick="handleCanvasClick(event)">
+      <div class="panel-title">Interactive Engineering Canvas (Click or Drag Bounding Box to Balloon)</div>
+      <div class="image-preview" id="canvasContainer" onmousedown="startDrag(event)" onmousemove="doDrag(event)" onmouseup="endDrag(event)">
         <img id="drawingImg" src="__IMG_SRC__" alt="Drawing Canvas" />
+        <div id="dragBox"></div>
       </div>
       <div class="controls">
         <button onclick="location.reload()">Reload Blueprint</button>
@@ -545,6 +550,92 @@ async def home():
   </div>
 
   <script>
+    let isDragging = false;
+    let startX = 0, startY = 0;
+    const dragBox = document.getElementById('dragBox');
+    const container = document.getElementById('canvasContainer');
+
+    function startDrag(e) {
+      if (e.target !== container && e.target.id !== 'drawingImg') return;
+      isDragging = true;
+      const rect = container.getBoundingClientRect();
+      startX = e.clientX - rect.left;
+      startY = e.clientY - rect.top;
+      dragBox.style.left = startX + 'px';
+      dragBox.style.top = startY + 'px';
+      dragBox.style.width = '0px';
+      dragBox.style.height = '0px';
+      dragBox.style.display = 'block';
+    }
+
+    function doDrag(e) {
+      if (!isDragging) return;
+      const rect = container.getBoundingClientRect();
+      const currentX = e.clientX - rect.left;
+      const currentY = e.clientY - rect.top;
+
+      const x = Math.min(startX, currentX);
+      const y = Math.min(startY, currentY);
+      const w = Math.abs(currentX - startX);
+      const h = Math.abs(currentY - startY);
+
+      dragBox.style.left = x + 'px';
+      dragBox.style.top = y + 'px';
+      dragBox.style.width = w + 'px';
+      dragBox.style.height = h + 'px';
+    }
+
+    async function endDrag(e) {
+      if (!isDragging) return;
+      isDragging = false;
+      dragBox.style.display = 'none';
+
+      const rect = container.getBoundingClientRect();
+      const endX = e.clientX - rect.left;
+      const endY = e.clientY - rect.top;
+
+      const boxW = Math.abs(endX - startX);
+      const boxH = Math.abs(endY - startY);
+
+      const scaleX = 1400 / rect.width;
+      const scaleY = 900 / rect.height;
+
+      const clickX = Math.round(Math.min(startX, endX) * scaleX);
+      const clickY = Math.round(Math.min(startY, endY) * scaleY);
+      const widthVal = Math.round(Math.max(boxW * scaleX, 40));
+      const heightVal = Math.round(Math.max(boxH * scaleY, 30));
+
+      const promptVal = prompt('Inspector Bounding Region: Enter Nominal Dimension (e.g. 50.00):', '50.00');
+      if (!promptVal) return;
+
+      const res = await fetch('/api/v1/add-region-feature', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          x: clickX,
+          y: clickY,
+          w: widthVal,
+          h: heightVal,
+          nominal: parseFloat(promptVal),
+          tolerance: 0.15
+        })
+      });
+      const data = await res.json();
+      if (data.annotated_image_b64) {
+        document.getElementById('drawingImg').src = data.annotated_image_b64;
+        const c = data.new_characteristic;
+        const row = `<tr>
+          <td>${c.char_index}</td>
+          <td>${c.char_type}</td>
+          <td>${c.description}</td>
+          <td>${c.upper_spec_limit.toFixed(4)}</td>
+          <td style="color:#38bdf8;font-weight:bold;">${c.tool}</td>
+        </tr>`;
+        document.getElementById('charBody').innerHTML += row;
+        document.getElementById('qmsStatus').innerHTML = '<span style="color:#22c55e;">✔ Bounded feature #' + c.char_index + ' added at [' + clickX + ', ' + clickY + ', ' + widthVal + ', ' + heightVal + ']</span>';
+      }
+    }
+
     async function uploadDrawing(event) {
       const file = event.target.files[0];
       if (!file) return;
@@ -582,41 +673,6 @@ async def home():
           <td style="color:#38bdf8;font-weight:bold;">${c.tool}</td>
         </tr>
       `).join('');
-    }
-
-    async function handleCanvasClick(e) {
-      const img = document.getElementById('drawingImg');
-      const rect = img.getBoundingClientRect();
-      const scaleX = 1400 / rect.width;
-      const scaleY = 900 / rect.height;
-
-      const clickX = Math.round((e.clientX - rect.left) * scaleX);
-      const clickY = Math.round((e.clientY - rect.top) * scaleY);
-
-      if (clickX < 0 || clickX > 1400 || clickY < 0 || clickY > 900) return;
-
-      const promptVal = prompt('Inspector Manual Balloon: Enter Feature Nominal (e.g. 75.00):', '75.00');
-      if (!promptVal) return;
-
-      const res = await fetch('/api/v1/add-balloon', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ x: clickX, y: clickY, nominal: parseFloat(promptVal), tolerance: 0.15 })
-      });
-      const data = await res.json();
-      if (data.annotated_image_b64) {
-        img.src = data.annotated_image_b64;
-        const c = data.new_characteristic;
-        const row = `<tr>
-          <td>${c.char_index}</td>
-          <td>${c.char_type}</td>
-          <td>${c.description}</td>
-          <td>${c.upper_spec_limit.toFixed(4)}</td>
-          <td style="color:#38bdf8;font-weight:bold;">${c.tool}</td>
-        </tr>`;
-        document.getElementById('charBody').innerHTML += row;
-        document.getElementById('qmsStatus').innerHTML = '<span style="color:#22c55e;">✔ Manually stamped Balloon #' + c.char_index + ' at (' + clickX + ', ' + clickY + ')</span>';
-      }
     }
 
     async function dispatchQMS() {
