@@ -1,0 +1,11 @@
+﻿services:
+  robotics-twin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ur5-digital-twin
+    ports:
+      - "8000:8000"
+    environment:
+      - MUJOCO_GL=osmesa
+    restart: unless-stopped
