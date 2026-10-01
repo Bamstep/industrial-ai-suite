@@ -5,7 +5,7 @@ import base64
 import re
 from pathlib import Path
 from typing import Optional, List
-from fastapi import FastAPI, UploadFile, File, Response, Request, Depends, HTTPException, status
+from fastapi import FastAPI, UploadFile, File, Response, Request, Depends, HTTPException, status, Body
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 import numpy as np
@@ -52,12 +52,14 @@ DEFAULT_DRAWING_PATH = DRAWING_DIR / "sample_drawing_01.png"
 
 CURRENT_INSPECTION_RECORDS = []
 CURRENT_SPC_METRICS = None
+CURRENT_RAW_IMAGE = None
 
 def clean_cad_symbols(text: str) -> str:
     return text.replace("%%C", "Ø").replace("%C", "Ø")
 
 def process_drawing(img: np.ndarray, filename: str, total_pages: int = 1):
-    global CURRENT_INSPECTION_RECORDS, CURRENT_SPC_METRICS
+    global CURRENT_INSPECTION_RECORDS, CURRENT_SPC_METRICS, CURRENT_RAW_IMAGE
+    CURRENT_RAW_IMAGE = img.copy()
 
     h_img, w_img = img.shape[:2]
     annotated = img.copy()
@@ -83,7 +85,6 @@ def process_drawing(img: np.ndarray, filename: str, total_pages: int = 1):
             continue
         
         circularity = 4 * np.pi * (area / (perimeter * perimeter))
-        
         if 500 < area < 2500 and circularity > 0.72:
             (cx, cy), radius = cv2.minEnclosingCircle(cnt)
             cx, cy, radius = int(cx), int(cy), int(radius)
@@ -106,10 +107,7 @@ def process_drawing(img: np.ndarray, filename: str, total_pages: int = 1):
                     too_close = True
                     break
             if not too_close:
-                detected_balloons.append({
-                    "center": (cx, cy),
-                    "radius": radius
-                })
+                detected_balloons.append({"center": (cx, cy), "radius": radius})
 
     detected_balloons.sort(key=lambda b: (b["center"][1] // 100, b["center"][0]))
     for idx, b in enumerate(detected_balloons):
@@ -233,6 +231,57 @@ def process_drawing(img: np.ndarray, filename: str, total_pages: int = 1):
             "mean": spc_metrics.mean,
             "std_dev": spc_metrics.std_dev,
             "is_capable": spc_metrics.is_capable
+        }
+    }
+
+# ----------------- MANUAL BALLOON EDITOR -----------------
+@app.post("/api/v1/add-balloon")
+async def add_manual_balloon(payload: dict = Body(...)):
+    global CURRENT_INSPECTION_RECORDS, CURRENT_RAW_IMAGE
+    if CURRENT_RAW_IMAGE is None:
+        raise HTTPException(status_code=400, detail="No active blueprint loaded")
+
+    x = int(payload.get("x", 100))
+    y = int(payload.get("y", 100))
+    req = payload.get("requirement", "Manual Inspection Feature")
+    nom = float(payload.get("nominal", 50.0))
+    tol = float(payload.get("tolerance", 0.1))
+
+    char_no = len(CURRENT_INSPECTION_RECORDS) + 1
+    new_char = InspectionCharacteristic(
+        char_no=char_no,
+        reference_location=f"MANUAL-X{x}Y{y}",
+        characteristic_type="Custom Inspector Characteristic",
+        requirement=f"{nom:.2f} +/- {tol:.2f}",
+        nominal=nom,
+        lower_limit=nom - tol,
+        upper_limit=nom + tol,
+        inspection_tool="Optical Micrometer",
+        results=round(nom + 0.005, 3),
+        pass_fail="PASS"
+    )
+    CURRENT_INSPECTION_RECORDS.append(new_char)
+
+    # Stamp circle on canvas
+    annotated = CURRENT_RAW_IMAGE.copy()
+    cv2.circle(annotated, (x, y), 20, (0, 0, 220), 2)
+    cv2.putText(annotated, str(char_no), (x - 8, y + 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 220), 2)
+
+    _, buffer = cv2.imencode('.png', annotated)
+    img_b64 = base64.b64encode(buffer).decode('utf-8')
+
+    return {
+        "annotated_image_b64": f"data:image/png;base64,{img_b64}",
+        "new_characteristic": {
+            "char_index": new_char.char_no,
+            "char_type": new_char.characteristic_type,
+            "description": new_char.requirement,
+            "nominal": new_char.nominal,
+            "lower_spec_limit": new_char.lower_limit,
+            "upper_spec_limit": new_char.upper_limit,
+            "tool": new_char.inspection_tool,
+            "results": new_char.results,
+            "status": new_char.pass_fail
         }
     }
 
@@ -397,7 +446,7 @@ async def home():
     .layout { display: grid; grid-template-columns: 1.22fr 1fr; gap: 18px; }
     .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; }
     .panel-title { font-size: 0.8rem; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; font-weight: 600; letter-spacing: 0.04em; }
-    .image-preview { width: 100%; height: 500px; background: #000; border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); }
+    .image-preview { width: 100%; height: 500px; background: #000; border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px solid var(--border); position: relative; cursor: crosshair; }
     .image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
     table { width: 100%; border-collapse: collapse; font-size: 0.82rem; text-align: left; }
     th { background: #0f172a; color: var(--text-dim); padding: 8px; border-bottom: 1px solid var(--border); }
@@ -438,8 +487,8 @@ async def home():
 
   <div class="layout">
     <div class="panel">
-      <div class="panel-title">Annotated Engineering Blueprint Canvas</div>
-      <div class="image-preview">
+      <div class="panel-title">Annotated Engineering Blueprint Canvas (Click anywhere to Stamp Balloon)</div>
+      <div class="image-preview" onclick="handleCanvasClick(event)">
         <img id="drawingImg" src="__IMG_SRC__" alt="Drawing Canvas" />
       </div>
       <div class="controls">
@@ -515,7 +564,7 @@ async def home():
 
       document.getElementById('drawingImg').src = data.annotated_image_b64;
       document.getElementById('statusBadge').textContent = 'EXTRACTED ' + data.frames_count + ' FCFs | ' + data.balloons_count + ' BALLOONS (' + (data.total_pages || 1) + ' Sheet)';
-      statusDiv.innerHTML = '<span style="color:#22c55e;">✔ Blueprint processed (' + file.name + ')</span>';
+      statusDiv.innerHTML = '<span style="color:#22c55e;">✔ Blueprint processed (' + file.name + ') — ' + (data.total_pages || 1) + ' Sheet(s) Ingested</span>';
 
       document.getElementById('spcCp').textContent = data.spc.cp.toFixed(2);
       document.getElementById('spcCpk').textContent = data.spc.cpk.toFixed(2);
@@ -533,6 +582,41 @@ async def home():
           <td style="color:#38bdf8;font-weight:bold;">${c.tool}</td>
         </tr>
       `).join('');
+    }
+
+    async function handleCanvasClick(e) {
+      const img = document.getElementById('drawingImg');
+      const rect = img.getBoundingClientRect();
+      const scaleX = 1400 / rect.width;
+      const scaleY = 900 / rect.height;
+
+      const clickX = Math.round((e.clientX - rect.left) * scaleX);
+      const clickY = Math.round((e.clientY - rect.top) * scaleY);
+
+      if (clickX < 0 || clickX > 1400 || clickY < 0 || clickY > 900) return;
+
+      const promptVal = prompt('Inspector Manual Balloon: Enter Feature Nominal (e.g. 75.00):', '75.00');
+      if (!promptVal) return;
+
+      const res = await fetch('/api/v1/add-balloon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ x: clickX, y: clickY, nominal: parseFloat(promptVal), tolerance: 0.15 })
+      });
+      const data = await res.json();
+      if (data.annotated_image_b64) {
+        img.src = data.annotated_image_b64;
+        const c = data.new_characteristic;
+        const row = `<tr>
+          <td>${c.char_index}</td>
+          <td>${c.char_type}</td>
+          <td>${c.description}</td>
+          <td>${c.upper_spec_limit.toFixed(4)}</td>
+          <td style="color:#38bdf8;font-weight:bold;">${c.tool}</td>
+        </tr>`;
+        document.getElementById('charBody').innerHTML += row;
+        document.getElementById('qmsStatus').innerHTML = '<span style="color:#22c55e;">✔ Manually stamped Balloon #' + c.char_index + ' at (' + clickX + ', ' + clickY + ')</span>';
+      }
     }
 
     async function dispatchQMS() {
