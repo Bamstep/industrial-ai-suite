@@ -1,9 +1,11 @@
 ﻿import cv2
 import numpy as np
 import pytest
+from pathlib import Path
 from fastapi.testclient import TestClient
 
 from pipeline_vision.detector import PipelineCorrosionDetector
+from pipeline_vision.video_processor import PipelineVideoInspector
 from pipeline_vision.api.app import app
 
 client = TestClient(app)
@@ -22,8 +24,6 @@ def test_clean_pipe_detection():
 def test_corrosion_patch_segmentation():
     detector = PipelineCorrosionDetector()
     test_img = np.full((300, 300, 3), 140, dtype=np.uint8)
-    
-    # Draw simulated rust patch (BGR: brownish-orange)
     cv2.circle(test_img, (150, 150), 50, (30, 80, 170), -1)
     result = detector.analyze(test_img)
 
@@ -41,12 +41,23 @@ def test_api_health_endpoint():
 def test_api_inspect_endpoint():
     test_img = np.full((100, 100, 3), 140, dtype=np.uint8)
     _, encoded = cv2.imencode(".jpg", test_img)
-    
     response = client.post(
         "/api/v1/inspect",
         files={"file": ("test.jpg", encoded.tobytes(), "image/jpeg")}
     )
     assert response.status_code == 200
-    payload = response.json()
-    assert "integrity_status" in payload
-    assert payload["integrity_status"] == "ACCEPTABLE"
+    assert response.json()["integrity_status"] == "ACCEPTABLE"
+
+
+def test_video_inspector_on_synthetic_video():
+    video_path = Path("pipeline-vision-inspector/sample_data/crawler_run_sample.mp4")
+    if not video_path.exists():
+        video_path = Path("sample_data/crawler_run_sample.mp4")
+
+    inspector = PipelineVideoInspector()
+    summary = inspector.inspect_video(video_path)
+
+    assert summary.total_frames == 125
+    assert summary.total_distance_inspected_m == 1.0
+    assert summary.worst_severity == "REPAIR_REQUIRED"
+    assert len(summary.anomalies) > 0
