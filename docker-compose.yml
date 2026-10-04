@@ -22,3 +22,14 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
+
+  turbomachinery-pdm:
+    build:
+      context: ./turbomachinery-pdm
+      dockerfile: Dockerfile
+    container_name: turbomachinery_pdm_app
+    ports:
+      - "8002:8002"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
