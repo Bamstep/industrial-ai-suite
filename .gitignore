@@ -21,3 +21,10 @@ Thumbs.db
 # Uploaded inspection artifacts
 data/drawings/*.png
 !data/drawings/sample_drawing_01.png
+
+# Runtime & Scratch Artifacts
+*.stl
+*.log
+*MUJOCO_LOG.TXT
+logs/
+data/output/
