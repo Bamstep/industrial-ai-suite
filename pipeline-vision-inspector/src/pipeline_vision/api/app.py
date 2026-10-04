@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from pipeline_vision.detector import PipelineCorrosionDetector
 from pipeline_vision.video_processor import PipelineVideoInspector
 from pipeline_vision.api.schemas import InspectionResponse, DefectClusterResponse
+from pipeline_vision.report_generator import generate_asme_b31g_report
 
 app = FastAPI(
     title="Pipeline Vision Integrity Inspector",
@@ -29,7 +30,6 @@ def health_check():
 def get_sample_file(filename: str):
     p = Path("sample_data") / filename
     if not p.exists():
-        # Fallback check relative to package dir
         p = Path("pipeline-vision-inspector/sample_data") / filename
     if not p.exists():
         raise HTTPException(status_code=404, detail="Sample asset not found")
@@ -99,7 +99,6 @@ async def inspect_and_visualize(file: UploadFile = File(...)):
 
 @app.post("/api/v1/inspect/video")
 async def inspect_crawler_video(file: UploadFile = File(...)):
-    # Write uploaded stream to temporary mp4 file
     suffix = Path(file.filename).suffix or ".mp4"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         contents = await file.read()
@@ -112,9 +111,7 @@ async def inspect_crawler_video(file: UploadFile = File(...)):
         if tmp_path.exists():
             tmp_path.unlink()
 
-    # Encode top 4 representative anomaly keyframes to base64
     keyframes_payload = []
-    # Pick evenly spaced keyframes from detected anomalies
     sample_indices = np.linspace(0, max(0, len(summary.anomalies) - 1), min(4, len(summary.anomalies)), dtype=int)
     for idx in sample_indices:
         if not summary.anomalies:
@@ -150,6 +147,29 @@ async def inspect_crawler_video(file: UploadFile = File(...)):
     }
 
 
+@app.post("/api/v1/inspect/video/report")
+async def export_crawler_report(file: UploadFile = File(...)):
+    suffix = Path(file.filename).suffix or ".mp4"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        contents = await file.read()
+        tmp.write(contents)
+        tmp_path = Path(tmp.name)
+
+    try:
+        summary = video_inspector.inspect_video(tmp_path)
+        report_file = Path(tempfile.gettempdir()) / "ASME_B31G_Inspection_Audit.xlsx"
+        generate_asme_b31g_report(summary, report_file)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+
+    return FileResponse(
+        report_file,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="ASME_B31G_Inspection_Audit.xlsx"
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def serve_dashboard():
     return """
@@ -181,6 +201,8 @@ def serve_dashboard():
             .btn:hover { background: #1d4ed8; }
             .btn-accent { background: #0891b2; }
             .btn-accent:hover { background: #0e7490; }
+            .btn-success { background: #059669; }
+            .btn-success:hover { background: #047857; }
             .btn-outline { background: transparent; border: 1px solid var(--border); color: #cbd5e1; }
             .btn-outline:hover { background: #334155; }
             .metric-box { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #334155; }
@@ -217,6 +239,7 @@ def serve_dashboard():
                     <input type="file" id="videoInput" accept="video/mp4" style="display: none;" onchange="handleVideoUpload(event)">
                     <button class="btn btn-accent" onclick="document.getElementById('videoInput').click()">Upload Crawler Video (.mp4)</button>
                     <button class="btn btn-accent" onclick="loadSampleVideo()">Run Sample Crawler Run (5s Stream)</button>
+                    <button class="btn btn-success" id="exportReportBtn" style="display: none;" onclick="downloadComplianceReport()">Download ASME B31G Audit Sheet (.xlsx)</button>
 
                     <div style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px;">
                         <input type="file" id="imageInput" accept="image/*" style="display: none;" onchange="handleImageUpload(event)">
@@ -272,6 +295,8 @@ def serve_dashboard():
         </div>
 
         <script>
+            let activeVideoBlob = null;
+
             async function loadSampleImage(filename) {
                 const res = await fetch('/sample/' + filename);
                 const blob = await res.blob();
@@ -286,6 +311,7 @@ def serve_dashboard():
                 const formData = new FormData();
                 formData.append('file', blob, 'frame.jpg');
 
+                document.getElementById('exportReportBtn').style.display = 'none';
                 document.getElementById('placeholderText').innerText = "Analyzing frame via OpenCV CLAHE & color segmentation...";
                 document.getElementById('placeholderText').style.display = "block";
                 document.getElementById('resultImage').style.display = "none";
@@ -305,11 +331,15 @@ def serve_dashboard():
             async function loadSampleVideo() {
                 const res = await fetch('/sample/crawler_run_sample.mp4');
                 const blob = await res.blob();
+                activeVideoBlob = blob;
                 analyzeVideoFile(blob);
             }
 
             function handleVideoUpload(e) {
-                if (e.target.files[0]) analyzeVideoFile(e.target.files[0]);
+                if (e.target.files[0]) {
+                    activeVideoBlob = e.target.files[0];
+                    analyzeVideoFile(activeVideoBlob);
+                }
             }
 
             async function analyzeVideoFile(blob) {
@@ -324,9 +354,9 @@ def serve_dashboard():
                 const data = await res.json();
 
                 document.getElementById('placeholderText').style.display = "none";
+                document.getElementById('exportReportBtn').style.display = 'block';
                 updateStatus(data.worst_severity, `${data.total_distance_m.toFixed(3)} m`, data.anomalies_logged);
 
-                // Populate Anomaly Log Table
                 const tbody = document.getElementById('anomalyTableBody');
                 tbody.innerHTML = '';
                 if (data.anomaly_log.length > 0) {
@@ -343,7 +373,6 @@ def serve_dashboard():
                     });
                 }
 
-                // Render Keyframe Snapshots
                 const kfGrid = document.getElementById('keyframeGrid');
                 kfGrid.innerHTML = '';
                 if (data.keyframes && data.keyframes.length > 0) {
@@ -361,6 +390,22 @@ def serve_dashboard():
                         kfGrid.appendChild(card);
                     });
                 }
+            }
+
+            async function downloadComplianceReport() {
+                if (!activeVideoBlob) return;
+                const formData = new FormData();
+                formData.append('file', activeVideoBlob, 'crawler_run.mp4');
+
+                const res = await fetch('/api/v1/inspect/video/report', { method: 'POST', body: formData });
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'ASME_B31G_Inspection_Audit.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
             }
 
             function updateStatus(status, distanceStr, anomaliesCount) {

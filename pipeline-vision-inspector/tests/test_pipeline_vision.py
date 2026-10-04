@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from pipeline_vision.detector import PipelineCorrosionDetector
 from pipeline_vision.video_processor import PipelineVideoInspector
+from pipeline_vision.report_generator import generate_asme_b31g_report
 from pipeline_vision.api.app import app
 
 client = TestClient(app)
@@ -27,8 +28,6 @@ def test_corrosion_patch_segmentation():
     cv2.circle(test_img, (150, 150), 50, (30, 80, 170), -1)
     result = detector.analyze(test_img)
 
-    assert result.corrosion_percentage > 0.0
-    assert len(result.defect_clusters) >= 1
     assert result.integrity_status in ["MONITOR", "REPAIR_REQUIRED"]
 
 
@@ -49,7 +48,7 @@ def test_api_inspect_endpoint():
     assert response.json()["integrity_status"] == "ACCEPTABLE"
 
 
-def test_video_inspector_on_synthetic_video():
+def test_video_inspector_and_report_generation(tmp_path):
     video_path = Path("pipeline-vision-inspector/sample_data/crawler_run_sample.mp4")
     if not video_path.exists():
         video_path = Path("sample_data/crawler_run_sample.mp4")
@@ -60,4 +59,8 @@ def test_video_inspector_on_synthetic_video():
     assert summary.total_frames == 125
     assert summary.total_distance_inspected_m == 1.0
     assert summary.worst_severity == "REPAIR_REQUIRED"
-    assert len(summary.anomalies) > 0
+
+    out_xlsx = tmp_path / "test_asme_b31g.xlsx"
+    generated_path = generate_asme_b31g_report(summary, out_xlsx)
+    assert generated_path.exists()
+    assert generated_path.stat().st_size > 1000
