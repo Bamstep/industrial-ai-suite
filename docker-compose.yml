@@ -1,11 +1,24 @@
-version: '3.8'
+﻿version: '3.8'
 
 services:
-  metrology-app:
-    build: .
-    container_name: industrial-ai-suite
+  robotics-twin:
+    build:
+      context: ./robotics-digital-twin
+      dockerfile: Dockerfile
+    container_name: robotics_digital_twin_app
     ports:
       - "8000:8000"
-    volumes:
-      - ./data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  pipeline-inspector:
+    build:
+      context: ./pipeline-vision-inspector
+      dockerfile: Dockerfile
+    container_name: pipeline_vision_inspector_app
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
