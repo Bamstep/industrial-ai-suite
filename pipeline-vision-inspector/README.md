@@ -1,11 +1,3 @@
-Yes, exactly! That was the **old** single-frame `pipeline-vision-inspector/README.md` before we built:
-
-1. **Continuous Video Crawler Processing** (`video_processor.py`)
-2. **Odometer Chainage (KP) Tracking**
-3. **Automated ASME B31G Excel Compliance Report Generator** (`report_generator.py`)
-4. **Synthetic Video Run Generator** (`generate_video.py`)
-
-Here is the fully updated, complete `pipeline-vision-inspector/README.md` reflecting all the new enterprise features and endpoints:
 
 ---
 
