@@ -1,0 +1,6 @@
+pyproject.toml
+src/pipeline_vision_inspector.egg-info/PKG-INFO
+src/pipeline_vision_inspector.egg-info/SOURCES.txt
+src/pipeline_vision_inspector.egg-info/dependency_links.txt
+src/pipeline_vision_inspector.egg-info/requires.txt
+src/pipeline_vision_inspector.egg-info/top_level.txt

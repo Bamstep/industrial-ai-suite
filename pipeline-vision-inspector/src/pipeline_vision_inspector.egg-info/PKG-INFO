@@ -1,0 +1,17 @@
+Metadata-Version: 2.4
+Name: pipeline-vision-inspector
+Version: 0.1.0
+Summary: Automated computer vision pipeline for oil & gas pipeline corrosion and defect detection
+Author: Bamstep
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: opencv-python-headless>=4.8.0
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: pillow>=10.0.0
+Requires-Dist: fastapi>=0.110.0
+Requires-Dist: uvicorn>=0.28.0
+Requires-Dist: pydantic>=2.6.0
+Requires-Dist: python-multipart>=0.0.9
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: httpx>=0.27.0; extra == "dev"
