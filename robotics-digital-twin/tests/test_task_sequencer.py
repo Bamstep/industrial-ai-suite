@@ -1,9 +1,8 @@
 import numpy as np
 import pytest
-
-from robotics_twin.simulation.mujoco_sim import MuJoCoSimulator
-from robotics_twin.vision.servoing import ClosedLoopIBVS
-from robotics_twin.tasks.task_sequencer import PickAndPlaceSequencer
+from robotics_twin.simulation.simulator import MuJoCoSimulator
+from robotics_twin.vision.ibvs_controller import ClosedLoopIBVS
+from robotics_twin.control.task_sequencer import PickAndPlaceSequencer
 
 
 def test_pick_and_place_sequencer_execution():
