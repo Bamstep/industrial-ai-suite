@@ -1,0 +1,53 @@
+{
+  "info": {
+    "name": "Industrial AI Suite API",
+    "_postman_id": "industrial-ai-suite-v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Robotics Twin - Telemetry Snapshot",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "http://localhost:8000/telemetry/snapshot", "protocol": "http", "host": ["localhost"], "port": "8000", "path": ["telemetry", "snapshot"] }
+      }
+    },
+    {
+      "name": "Robotics Twin - Plan and Execute Trajectory",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"goal_positions\": [0.0, -1.57, 1.57, 0.0, 0.0, 0.0],\n  \"duration\": 1.5\n}"
+        },
+        "url": { "raw": "http://localhost:8000/trajectory/plan-and-execute", "protocol": "http", "host": ["localhost"], "port": "8000", "path": ["trajectory", "plan-and-execute"] }
+      }
+    },
+    {
+      "name": "Pipeline Vision - Inspect Frame",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [{"key": "file", "type": "file"}]
+        },
+        "url": { "raw": "http://localhost:8001/inspect", "protocol": "http", "host": ["localhost"], "port": "8001", "path": ["inspect"] }
+      }
+    },
+    {
+      "name": "Turbomachinery PdM - Diagnose",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sampling_rate\": 2048,\n  \"operating_rpm\": 3000,\n  \"machine_class\": \"Class II\",\n  \"acceleration_data\": [0.01, 0.04, -0.02, 0.05, 0.02]\n}"
+        },
+        "url": { "raw": "http://localhost:8002/diagnose", "protocol": "http", "host": ["localhost"], "port": "8002", "path": ["diagnose"] }
+      }
+    }
+  ]
+}
