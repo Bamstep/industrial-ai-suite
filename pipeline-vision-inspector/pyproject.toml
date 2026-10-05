@@ -14,7 +14,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
     "python-multipart>=0.0.6",
-    "openpyxl>=3.1.2",
+    "openpyxl", "pillow>=3.1.2",
 ]
 
 [project.optional-dependencies]
