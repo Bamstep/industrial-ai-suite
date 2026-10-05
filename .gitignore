@@ -28,3 +28,9 @@ data/drawings/*.png
 *MUJOCO_LOG.TXT
 logs/
 data/output/
+
+# Python packaging and egg metadata
+*.egg-info/
+*.egg
+build/
+dist/
